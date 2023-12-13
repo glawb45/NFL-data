@@ -1,0 +1,223 @@
+---
+title: "QB Salaries"
+author: "Gaurav Law"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggrepel)
+library(nflreadr)
+library(nflplotR)
+library(nflfastR)
+library(nflverse)
+```
+
+
+```{r}
+nflreadr::clear_cache()
+contracts <- nflreadr::load_contracts()
+load_teams()
+head(contracts, n = 10)
+```
+
+```{r}
+top_qb_contracts <- contracts %>% 
+  filter(position == "QB") %>%
+  arrange(year_signed) %>%
+  ungroup() %>%
+  group_by(otc_id) %>%
+  mutate(contract_num = row_number())
+
+last_contracts <- top_qb_contracts %>%
+  group_by(otc_id) %>%
+  summarize(last_num = max(contract_num))
+
+top_qb_contracts <- top_qb_contracts %>%
+  left_join(last_contracts, by = "otc_id") %>%
+  filter(contract_num == last_num)
+top_qb_contracts
+
+head(top_qb_contracts)
+
+```
+
+
+```{r}
+top_qb_contracts <- top_qb_contracts %>%
+  left_join(load_teams(), by = c('team' = 'team_nick')) %>% arrange(-apy)
+
+head(load_teams())
+
+top_qb_contracts[10, "player"] <- "Matthew Stafford"
+
+view(top_qb_contracts)
+```
+
+
+```{r pbp}
+pbp <- load_pbp(2018:2022)
+pbp_23 <- load_pbp(2023)
+```
+
+```{r}
+rosters <- load_rosters(2018:2022) %>% distinct(gsis_id, .keep_all = TRUE)
+rosters_23 <- load_rosters(2023) %>% distinct(gsis_id, .keep_all = TRUE)
+
+head(load_rosters(2018))
+
+pbp <- pbp %>% left_join(rosters, by = c("id" = "gsis_id"))
+pbp_23 <- pbp_23 %>% left_join(rosters_23, by = c("id" = "gsis_id"))
+
+head(pbp)
+```
+
+```{r}
+qbs <- pbp %>% 
+  filter(season_type == "REG", !is.na(epa)) %>%
+  filter(pass == 1 | rush == 1) %>%
+  group_by(id, full_name) %>%
+  summarize(
+  q_epa = mean(qb_epa),
+  cpoe = mean(cpoe, na.rm = T),
+  n_dropbacks = sum(pass),
+  n_plays = n(),
+  team = last(team)) %>%
+  left_join(top_qb_contracts, by = c("full_name" = "player")) %>% filter(n_dropbacks > 100 & n_plays > 500) %>% arrange(-q_epa)
+
+head(qbs, n = 20)
+view(qbs)
+
+qb_40 <- head(qbs, n = 40)
+qb_40
+```
+
+
+```{r}
+qb_40 %>%
+  ggplot(aes(x = q_epa, y = apy/1000000)) +
+  #horizontal line with mean EPA
+  geom_hline(yintercept = mean(qb_40$apy/1000000), color = "red", linetype = "dashed", alpha=0.5) +
+  #vertical line with mean CPOE
+  geom_vline(xintercept =  mean(qb_40$q_epa), color = "red", linetype = "dashed", alpha=0.5) +
+  #add points for the QBs with the logos (this uses nflplotR package)
+  geom_nfl_logos(aes(team_abbr = team_abbr), width = qb_40$n_plays / 45000, alpha = 0.75) +
+  #add names using ggrepel, which tries to make them not overlap
+  geom_text_repel(aes(label=full_name)) +
+  #add a smooth line fitting cpoe + epa
+  stat_smooth(geom='line', alpha=0.5, se=FALSE, method='lm')+
+  #titles and caption
+  labs(x = "QB Epa/play",
+       y = "Amount per year",
+       title = "Quarterback Efficiency vs. Annual Salaries, 2018-2022",
+       caption = "Data: @nflfastR\nAuthor: Gaurav Law") +
+  theme_bw() +
+  #center title
+  theme(
+    plot.title = element_text(size = 15, hjust = 0.5, face = "bold")
+  ) +
+  #make ticks look nice
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+```
+
+```{r}
+qbs_current <- pbp_23 %>% 
+  filter(season_type == "REG", !is.na(epa)) %>%
+  filter(pass == 1 | rush == 1) %>%
+  group_by(id, full_name) %>%
+  summarize(
+  q_epa = mean(qb_epa),
+  cpoe = mean(cpoe, na.rm = T),
+  n_dropbacks = sum(pass),
+  n_plays = n(),
+  team = last(team)) %>%
+  left_join(top_qb_contracts, by = c("full_name" = "player")) %>% filter(n_dropbacks > 300 & n_plays > 200) %>% arrange(-n_dropbacks)
+
+qbs_current
+```
+
+```{r}
+qbs_current %>%
+  ggplot(aes(x = q_epa, y = apy)) +
+  #horizontal line with mean EPA
+  geom_hline(yintercept = mean(qbs_current$apy), color = "red", linetype = "dashed", alpha=0.5) +
+  #vertical line with mean CPOE
+  geom_vline(xintercept =  mean(qbs_current$q_epa), color = "red", linetype = "dashed", alpha=0.5) +
+  #add points for the QBs with the logos (this uses nflplotR package)
+  geom_nfl_logos(aes(team_abbr = team_abbr), width = qbs_current$n_plays / 12000, alpha = 0.75) +
+  #add names using ggrepel, which tries to make them not overlap
+  geom_text_repel(aes(label=full_name), max.overlaps = 20) +
+  #add a smooth line fitting cpoe + epa
+  stat_smooth(geom='line', alpha=0.5, se=FALSE, method='lm')+
+  #titles and caption
+  labs(x = "QB Epa/play",
+       y = "Amount per year",
+       title = "Current Quarterback Efficiency vs. Annual Salaries",
+       caption = "Data: @nflfastR\nAuthor: Gaurav Law") +
+  theme_bw() +
+  #center title
+  theme(
+    plot.title = element_text(size = 15, hjust = 0.5, face = "bold")
+  ) +
+  #make ticks look nice
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+```
+
+
+
+```{r}
+p_stats <- load_player_stats()
+names(p_stats)
+```
+
+Yards Per Route Run
+
+```{r}
+pbp_for_routes <- load_participation(2018:2022, include_pbp = TRUE)
+players <- load_players()
+
+#extract offensive player IDs
+
+player_rows_pbp <- pbp_for_routes |>
+  mutate(offense_player_id = str_extract_all(offense_players, "\\d{2}-\\d{7}")) |>
+  unnest(offense_player_id)
+
+#add player info to dataset
+
+player_rows_pbp <- left_join(player_rows_pbp, players, by = c("offense_player_id" = "gsis_id"))
+
+#Example of a 2022 season summary for WRs 
+#results include playoff games and targeted plays with penalty yardage
+#"routes run" includes passing plays where a player was assigned to block
+#WRs almost never block on pass plays, but TEs and RBs sometimes do
+
+routes_run_data <- player_rows_pbp |>
+  #add additional season or situational filters here, if desired
+  filter(pass == 1, season == 2022,
+         position_group == "WR") |>
+  group_by(offense_player_id) |>
+  summarise(player_name = last(display_name),
+            position = last(position_group),
+            team = last(posteam),
+            routes_run = n(),
+            targets = length(offense_player_id[offense_player_id == receiver_id & !is.na(receiver_id)]),
+            receiving_yards = sum(yards_gained[offense_player_id == receiver_id & !is.na(receiver_id) & !is.na(yards_gained)]),
+            first_downs = sum(first_down[offense_player_id == receiver_id & !is.na(receiver_id) & !is.na(first_down)]),
+            touchdowns = sum(touchdown[offense_player_id == receiver_id & !is.na(receiver_id) & !is.na(touchdown)])) |>
+  mutate(targets_per_route_run = targets / routes_run,
+         yards_per_route_run = receiving_yards / routes_run,
+         #This is Timo Riske's formula for adjusted yards per route run
+         adj_yprr = (receiving_yards + 9*first_downs + 11*touchdowns) / routes_run) |>
+  select(-offense_player_id) |>
+  filter(routes_run > 200) |>
+  arrange(-yards_per_route_run)
+```
