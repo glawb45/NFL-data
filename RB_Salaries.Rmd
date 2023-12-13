@@ -1,0 +1,173 @@
+---
+title: "RB Salaries"
+author: "Gaurav Law"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(nflfastR)
+library(ggrepel)
+library(nflplotR)
+library(nflreadr)
+library(nflfastR)
+library(nflverse)
+library(dplyr)
+library(tibble)
+```
+
+```{r}
+nflreadr::clear_cache()
+contracts <- nflreadr::load_contracts()
+load_teams()
+head(contracts, n = 10)
+```
+
+```{r}
+top_rb_contracts <- contracts %>% 
+  filter(position == "RB") %>%
+  arrange(year_signed) %>%
+  ungroup() %>%
+  group_by(otc_id) %>%
+  mutate(contract_num = row_number())
+
+last_contracts <- top_rb_contracts %>%
+  group_by(otc_id) %>%
+  summarize(last_num = max(contract_num))
+
+top_rb_contracts <- top_rb_contracts %>%
+  left_join(last_contracts, by = "otc_id") %>%
+  filter(contract_num == last_num)
+top_rb_contracts
+```
+
+```{r}
+top_rb_contracts <- top_rb_contracts %>%
+  left_join(load_teams(), by = c('team' = 'team_nick')) %>% arrange(-apy)
+
+head(load_teams())
+
+top_rb_contracts[121, "player"] <- "Ronald Jones"
+
+view(top_rb_contracts)
+```
+
+```{r pbp}
+pbp <- load_pbp(2018:2022)
+pbp_23 <- load_pbp(2023)
+```
+
+```{r}
+rosters <- load_rosters(2018:2022) %>% distinct(gsis_id, .keep_all = TRUE)
+rosters_23 <- load_rosters(2023) %>% distinct(gsis_id, .keep_all = TRUE)
+
+head(load_rosters(2018))
+
+pbp <- pbp %>% left_join(rosters, by = c("id" = "gsis_id"))
+pbp_23 <- pbp_23 %>% left_join(rosters_23, by = c("id" = "gsis_id"))
+
+head(pbp)
+```
+
+```{r}
+rbs <- pbp %>% 
+  filter(season_type == "REG", !is.na(epa)) %>%
+  filter(rush == 1) %>%
+  group_by(id, full_name) %>%
+  summarize(
+  epa = mean(epa),
+  r_epa = mean(total_home_rush_epa - total_away_rush_epa),
+  n_plays = n(),
+  team = last(team)) %>%
+  left_join(top_rb_contracts, by = c("full_name" = "player")) %>% filter(n_plays > 400) %>% arrange(-epa)
+
+rbs <- rbs[-c(1, 49, 45, 50, 12, 51, 41, 47, 48, 3, 52, 22, 54, 19, 27), ] #Remove Lamar Jackson and usual non-starting RB's
+
+view(rbs)
+```
+
+
+```{r}
+rbs %>%
+  ggplot(aes(x = epa, y = apy/1000000)) +
+  #horizontal line with mean EPA
+  geom_hline(yintercept = mean(rbs$apy/1000000), color = "red", linetype = "dashed", alpha=0.5) +
+  #vertical line with mean CPOE
+  geom_vline(xintercept =  mean(rbs$epa), color = "red", linetype = "dashed", alpha=0.5) +
+  #add points for the QBs with the logos (this uses nflplotR package)
+  geom_nfl_logos(aes(team_abbr = team.x), width = rbs$n_plays / 45000, alpha = 0.75) +
+  #add names using ggrepel, which tries to make them not overlap
+  geom_text_repel(aes(label=full_name)) +
+  #add a smooth line fitting cpoe + epa
+  stat_smooth(geom='line', alpha=0.5, se=FALSE, method='lm')+
+  #titles and caption
+  labs(x = "RB Epa/play",
+       y = "Amount per year",
+       title = "Running Back Efficiency vs. Annual Salaries, 2018-2022",
+       caption = "Data: @nflfastR\nAuthor: Gaurav Law") +
+  theme_bw() +
+  #center title
+  theme(
+    plot.title = element_text(size = 15, hjust = 0.3, face = "bold")
+  ) +
+  #make ticks look nice
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+```
+
+
+```{r}
+# 2023 RB's
+rbs_23 <- pbp_23 %>% 
+  filter(season_type == "REG", !is.na(epa)) %>%
+  filter(rush == 1) %>%
+  group_by(id, full_name) %>%
+  summarize(
+  epa = mean(epa),
+  r_epa = mean(total_home_rush_epa - total_away_rush_epa),
+  n_plays = n(),
+  team = last(team)) %>%
+  left_join(top_rb_contracts, by = c("full_name" = "player")) %>% filter(n_plays > 100) %>% arrange(-epa)
+
+#rbs <- rbs[-c(1, 49, 45, 50, 12, 51, 41, 47, 48, 3, 52, 22, 54, 19, 27), ] #Remove Lamar Jackson and usual non-starting RB's
+
+view(rbs_23)
+```
+
+
+```{r}
+rbs_23 %>%
+  ggplot(aes(x = epa, y = apy)) +
+  #horizontal line with mean EPA
+  geom_hline(yintercept = mean(rbs_23$apy), color = "red", linetype = "dashed", alpha=0.5) +
+  #vertical line with mean CPOE
+  geom_vline(xintercept =  mean(rbs_23$epa), color = "red", linetype = "dashed", alpha=0.5) +
+  #add points for the QBs with the logos (this uses nflplotR package)
+  geom_nfl_logos(aes(team_abbr = team.x), width = rbs_23$n_plays / 12000, alpha = 0.75) +
+  #add names using ggrepel, which tries to make them not overlap
+  geom_text_repel(aes(label=full_name)) +
+  #add a smooth line fitting cpoe + epa
+  stat_smooth(geom='line', alpha=0.5, se=FALSE, method='lm')+
+  #titles and caption
+  labs(x = "RB Epa/play",
+       y = "Amount per year (millions of dollars)",
+       title = "Current Running Back Efficiency vs. Annual Salaries",
+       caption = "Data: @nflfastR\nAuthor: Gaurav Law") +
+  theme_bw() +
+  #center title
+  theme(
+    plot.title = element_text(size = 15, hjust = 0.3, face = "bold")
+  ) +
+  #make ticks look nice
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+```
+
+
+
