@@ -172,6 +172,18 @@ qbs_current %>%
 
 ```
 
+q_full <- lm(q_epa ~ cpoe*apy + n_dropbacks, data = qbs_current)
+q_fitted <- lm(q_epa ~ cpoe*apy, data = qbs_current)
+summary(q_fitted)
+c(AIC(q_full, q_fitted), BIC(q_full, q_fitted))
+```
+
+## A one-percent increase in completion percentage over expected corresponds to a 0.0389-unit increase in QB EPA. This means that there is a very small positive relationship between how good a quarterback is and how often their expectation to complete their passes relative to how often they do. 
+
+## Similarly, a $1M-increase in average salary per year corresponds to a 0.0021-unit increase in QB EPA. This means that salary doesn't really effect how good a quarterback is.
+
+## In addition, the fact that our AIC is small tells us that we have a good model regardless. The model without the number of dropbacks is better than the one with, telling us that dropbacks don't really matter in how good a QB is.
+
 
 
 ```{r}
