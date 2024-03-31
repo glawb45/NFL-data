@@ -172,6 +172,7 @@ qbs_current %>%
 
 ```
 
+```{r}
 q_full <- lm(q_epa ~ cpoe*apy + n_dropbacks, data = qbs_current)
 q_fitted <- lm(q_epa ~ cpoe*apy, data = qbs_current)
 summary(q_fitted)
